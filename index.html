@@ -83,6 +83,11 @@ table.t tr:hover td.s0,table.t tr:hover td.s1{background:#f7faf8}
 tr.dom td{background:#fffdf0}
 tr.dom td.s0,tr.dom td.s1{background:#fffdf0}
 tr.dom:hover td{background:#fffbe0}
+tr.fest td{background:#fff8e0}
+tr.fest td.s0,tr.fest td.s1{background:#fff8e0}
+tr.fest:hover td{background:#fff3c4}
+/* Festivo label in date column */
+.fest-badge{display:inline-block;background:#f5a623;color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:3px;margin-left:3px;vertical-align:middle}
 tr.ws td{background:#ecf8f3;font-weight:700;color:var(--green-d);font-size:10.5px}
 tr.ws td.s0,tr.ws td.s1{background:#ecf8f3;color:var(--green-d)}
 tr.ws:hover td{background:#e0f4ea}
@@ -229,6 +234,36 @@ const PILL = {
 const DAY_ES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 const DAY_FULL = ['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
 
+// ── FESTIVOS COLOMBIA 2026 ──
+const FESTIVOS_2026 = new Set([
+  '2026-01-01', // Año Nuevo
+  '2026-01-12', // Reyes Magos
+  '2026-03-23', // San José
+  '2026-04-02', // Jueves Santo
+  '2026-04-03', // Viernes Santo
+  '2026-05-01', // Día del Trabajo
+  '2026-05-18', // Ascensión
+  '2026-06-08', // Corpus Christi
+  '2026-06-15', // Sagrado Corazón
+  '2026-06-29', // San Pedro y San Pablo
+  '2026-07-20', // Independencia
+  '2026-08-07', // Batalla de Boyacá
+  '2026-08-17', // Asunción de la Virgen
+  '2026-10-12', // Día de la Raza
+  '2026-11-02', // Todos los Santos
+  '2026-11-16', // Independencia de Cartagena
+  '2026-12-08', // Inmaculada Concepción
+  '2026-12-25', // Navidad
+]);
+
+function isFestivo(dateStr) { return FESTIVOS_2026.has(dateStr); }
+function isDomingo(dateStr) {
+  const d = parseDateStr(dateStr);
+  return d.getDay() === 0; // Sunday
+}
+function isDomOrFestivo(dateStr) { return isDomingo(dateStr) || isFestivo(dateStr); }
+
+
 // ── SCHEDULE STORE: { tiendaCode: { 'YYYY-MM-DD': { empIdx: {ap,ci,hl,rn,rnd,hdom,hfes,hexor,hexdf} } } }
 const SCHED = {};
 // ── EMPLOYEE NAME OVERRIDES: { tiendaCode: { empIdx: name } }
@@ -281,7 +316,8 @@ function buildCalendar(fromStr, toStr) {
       date: dateStr(current),
       dayIdx,
       label: DAY_ES[dayIdx],
-      isDom: dayIdx === 6
+      isDom: dayIdx === 6,
+      isFest: FESTIVOS_2026.has(dateStr(current))
     });
     current.setDate(current.getDate() + 1);
   }
@@ -315,7 +351,7 @@ function parseTime(s) {
   return parseInt(m[1]) * 60 + parseInt(m[2]);
 }
 
-function calcHours(ap, ci, isDom) {
+function calcHours(ap, ci, dateStr) {
   const a = parseTime(ap), c = parseTime(ci);
   if (a === null || c === null) return null;
   let diff = c - a; if (diff <= 0) diff += 24 * 60;
@@ -324,7 +360,15 @@ function calcHours(ap, ci, isDom) {
   const se = c <= a ? c + 24 * 60 : c;
   const os = Math.max(a, 21 * 60), oe = Math.min(se, 30 * 60);
   if (oe > os) rn = Math.round((oe - os) / 60);
-  return { hl, rn, hdom: isDom ? hl : 0 };
+  const festivo = isFestivo(dateStr);
+  const domingo = isDomingo(dateStr);
+  return {
+    hl,
+    rn,
+    hdom: domingo && !festivo ? hl : 0,  // dominical solo si NO es festivo
+    hfes: festivo ? hl : 0,              // festivo (incluye domingos festivos)
+    rnd: (domingo || festivo) ? rn : 0,  // recargo nocturno dom/fes
+  };
 }
 
 function getSpecKey(v) {
@@ -505,11 +549,13 @@ function commitTime(el) {
   const emp = getEmp(sel, date, parseInt(empIdx));
   emp[field] = val;
 
-  const isDom = parseDateStr(date).getDay() === 0; // Sunday
-  const calc = calcHours(emp.ap, emp.ci, isDom);
+  const calc = calcHours(emp.ap, emp.ci, date);
   if (calc) {
-    emp.hl = calc.hl; emp.rn = calc.rn; emp.hdom = calc.hdom > 0 ? calc.hdom : '';
-    ['hl','rn','hdom'].forEach(f => {
+    emp.hl = calc.hl; emp.rn = calc.rn;
+    emp.hdom = calc.hdom > 0 ? calc.hdom : '';
+    emp.hfes = calc.hfes > 0 ? calc.hfes : '';
+    emp.rnd  = calc.rnd  > 0 ? calc.rnd  : '';
+    ['hl','rn','hdom','hfes','rnd'].forEach(f => {
       const nel = document.querySelector(`.ne[data-date="${date}"][data-emp="${empIdx}"][data-field="${f}"]`);
       if (nel) nel.textContent = emp[f] || '–';
     });
@@ -668,9 +714,11 @@ function renderMalla(empIdx, df, dt) {
         <td>${neEl(day.date, e, 'hexdf', 'c-hexdf')}</td>`;
       }).join('');
 
-      body += `<tr class="week-${wid} ${day.isDom ? 'dom' : ''}">
+      const isFest = isFestivo(day.date);
+      const rowClass = isFest ? 'fest' : (day.isDom ? 'dom' : '');
+      body += `<tr class="week-${wid} ${rowClass}">
         <td class="s0">${day.label}</td>
-        <td class="s1">${fmtDisplay(day.date)}</td>
+        <td class="s1">${fmtDisplay(day.date)}${isFestivo(day.date)?'<span class="fest-badge">F</span>':''}</td>
         ${dayCells}</tr>`;
     });
   });
@@ -722,7 +770,8 @@ function renderEmp(empIdx, df, dt) {
       const sc = sk ? `<span class="eds" style="${PILL[sk]||''};padding:1px 7px;border-radius:10px;font-family:inherit;font-size:9.5px">${sk}</span>`
         : emp.ap && emp.ci ? `<span class="eds">${emp.ap}→${emp.ci}</span>` : '';
       if (!sc && !bgs) return '';
-      return `<div class="edr"><span class="edl">${day.label}</span><span class="edd">${fmtDisplay(day.date)}</span>${sc}<div class="bgs">${bgs}</div></div>`;
+      const festBadge = isFestivo(day.date) ? '<span class="fest-badge">F</span>' : '';
+      return `<div class="edr"><span class="edl">${day.label}</span><span class="edd">${fmtDisplay(day.date)}${festBadge}</span>${sc}<div class="bgs">${bgs}</div></div>`;
     }).filter(Boolean).join('');
 
     return `<div class="ec">
