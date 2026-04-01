@@ -106,7 +106,7 @@ td.spec-td{text-align:left;padding-left:8px}
 .sched-cell:hover .ei{opacity:1}
 
 /* DROPDOWN */
-.sched-menu{position:fixed;z-index:9999;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.13);min-width:185px;overflow:hidden;animation:mIn .12s ease}
+.sched-menu{position:fixed;z-index:9999;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.13);min-width:170px;overflow:hidden;animation:mIn .12s ease}
 @keyframes mIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 .ms{padding:6px 0}.ms+.ms{border-top:1px solid var(--border)}
 .ml{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:4px 12px 2px}
@@ -151,6 +151,11 @@ td.spec-td{text-align:left;padding-left:8px}
 .bg.hexor{background:#ffe5e5;color:var(--red)}.bg.hexdf{background:#fce7f3;color:var(--pink)}
 
 .hint{font-size:9.5px;color:var(--muted);padding:7px 0 3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+/* Inline time edit */
+.te{display:inline-block;min-width:36px;padding:1px 3px;border-radius:3px;font-family:Consolas,monospace;font-size:10.5px;font-weight:500;cursor:text;color:var(--text);transition:background .1s;text-align:center}
+.te:hover{background:rgba(28,124,84,.1)}.te:focus{outline:2px solid var(--green);background:#fff;border-radius:3px}
+.nov-btn{border-radius:3px;padding:1px 4px;transition:background .1s;color:var(--muted)}
+.nov-btn:hover{background:rgba(28,124,84,.12);opacity:1!important}
 </style>
 </head>
 <body>
@@ -198,14 +203,14 @@ let sel=null, view='malla';
 
 // Special options — NO emojis in pills, only in menu list
 const SPEC_OPTS=[
-  {key:'Compensatorio', icon:'🔄'},
-  {key:'Vacaciones',    icon:'🌴'},
-  {key:'Día Familia',   icon:'👨‍👩‍👧'},
-  {key:'Incapacidad',   icon:'🏥'},
-  {key:'Licencia',      icon:'📋'},
-  {key:'Entrenamiento', icon:'📚'},
-  {key:'Reunión',       icon:'🤝'},
-  {key:'Descanso',      icon:'💤'},
+  {key:'Compensatorio'},
+  {key:'Vacaciones'},
+  {key:'Día Familia'},
+  {key:'Incapacidad'},
+  {key:'Licencia'},
+  {key:'Entrenamiento'},
+  {key:'Reunión'},
+  {key:'Descanso'},
 ];
 
 // Pill colors per special type (no emoji)
@@ -358,29 +363,19 @@ function openSchedMenu(e,ri,ei){
 
   menu.innerHTML=`
     <div class="ms">
-      <div class="ml">Horario</div>
-      <div class="mtr">
-        <input class="mti" id="mi-ap" type="time" value="${ap}">
-        <span style="color:var(--muted);font-size:11px">→</span>
-        <input class="mti" id="mi-ci" type="time" value="${ci}">
-        <button class="mok" onclick="confirmTime()">✓ Ok</button>
-      </div>
-    </div>
-    <div class="ms">
-      <div class="ml">Novedad</div>
+      <div class="ml">Novedad del día</div>
       ${SPEC_OPTS.map(o=>`
         <div class="mi ${specKey===o.key?'act':''}" onclick="selectSpec('${o.key}')">
-          <span>${o.icon}</span><span class="mn">${o.key}</span>
+          <span class="mn">${o.key}</span>
         </div>`).join('')}
     </div>
-    <div class="ms"><div class="mcl" onclick="clearCell()">🗑 Limpiar celda</div></div>`;
+    <div class="ms"><div class="mcl" onclick="clearCell()">Limpiar celda</div></div>`;
 
   const rect=e.currentTarget.getBoundingClientRect();
   let top=rect.bottom+4, left=rect.left;
-  if(top+450>window.innerHeight) top=rect.top-450-4;
-  if(left+195>window.innerWidth) left=window.innerWidth-200;
+  if(top+320>window.innerHeight) top=rect.top-320-4;
+  if(left+175>window.innerWidth) left=window.innerWidth-180;
   menu.style.top=top+'px'; menu.style.left=left+'px'; menu.style.display='block';
-  setTimeout(()=>document.getElementById('mi-ap')?.focus(),40);
 }
 
 function closeMenu(){document.getElementById('schedMenu').style.display='none';menuCtx=null;}
@@ -420,11 +415,20 @@ function buildSchedInner(emp,ri,ei,dia){
   const sk=getSpecKey(emp.apertura);
   const style=sk?PILL_STYLE[sk]||'background:#f0fdf4;color:#166534':'';
   if(sk){
-    return `<span class="spec-pill" style="${style}">${sk}</span><span class="ei">✏️</span>`;
-  } else if(emp.apertura&&emp.cierre){
-    return `<span style="font-family:Consolas,monospace;font-size:10.5px;font-weight:500">${emp.apertura} → ${emp.cierre}</span><span class="ei">✏️</span>`;
+    // Special: pill + small edit link
+    return `<span class="spec-pill" style="${style}">${sk}</span><span class="ei" style="font-size:9px;margin-left:4px;opacity:.5">✕</span>`;
   } else {
-    return `<span style="color:#ccc;font-size:10px">Toca para agregar</span><span class="ei">✏️</span>`;
+    // Normal: inline editable time fields
+    const ap=emp.apertura||'';
+    const ci=emp.cierre||'';
+    return `<span class="te" contenteditable="true" data-row="${ri}" data-emp="${ei}" data-field="apertura" data-orig="${ap}"
+      onblur="commitTimeEdit(this)" onkeydown="editKey(event,this)" onclick="event.stopPropagation()"
+      title="Hora de entrada">${ap||'--:--'}</span>
+      <span style="color:var(--muted);font-size:10px;margin:0 2px">→</span>
+      <span class="te" contenteditable="true" data-row="${ri}" data-emp="${ei}" data-field="cierre" data-orig="${ci}"
+      onblur="commitTimeEdit(this)" onkeydown="editKey(event,this)" onclick="event.stopPropagation()"
+      title="Hora de salida">${ci||'--:--'}</span>
+      <span class="ei nov-btn" onclick="event.stopPropagation();openSchedMenu(event,${ri},${ei})" title="Marcar novedad" style="font-size:9px;margin-left:3px;opacity:.45;cursor:pointer">≡</span>`;
   }
 }
 
@@ -457,7 +461,26 @@ function commitEdit(el){
   el.dataset.orig=val;
   updateCards();
 }
-function editKey(e,el){if(e.key==='Enter'){e.preventDefault();el.blur();}if(e.key==='Escape'){el.textContent=el.dataset.orig||'–';el.blur();}}
+function editKey(e,el){if(e.key==='Enter'){e.preventDefault();el.blur();}if(e.key==='Escape'){el.textContent=el.dataset.orig||'';el.blur();}}
+function commitTimeEdit(el){
+  const ri=parseInt(el.dataset.row),ei=parseInt(el.dataset.emp),field=el.dataset.field;
+  let val=el.textContent.trim();
+  if(val==='--:--'||val==='') val='';
+  el.dataset.orig=val;
+  DATA[sel].rows[ri].employees[ei][field]=val;
+  // Auto-calc on cierre or apertura change
+  const emp=DATA[sel].rows[ri].employees[ei];
+  const calc=calcHours(emp.apertura,emp.cierre,DATA[sel].rows[ri].dia);
+  if(calc){
+    emp.hl=calc.hl; emp.rn=calc.rn; emp.hdom=calc.hdom>0?calc.hdom:'';
+    // update visible ne cells
+    ['hl','rn','hdom'].forEach(f=>{
+      const nel=document.querySelector(`.ne[data-row="${ri}"][data-emp="${ei}"][data-field="${f}"]`);
+      if(nel) nel.textContent=emp[f]||'–';
+    });
+  }
+  updateCards();
+}
 function editName(el){const ei=parseInt(el.dataset.emp);const val=el.textContent.trim();if(val&&sel) DATA[sel].employees[ei]=val;}
 function ne(v,ri,ei,field,cls='',extraClass=''){
   const val=v===''||v===null||v===undefined?'':String(v);
@@ -558,13 +581,13 @@ function renderMalla(tienda,empIdx,df,dt){
         // When special day: show pill spanning cols, hide all number cells
         if(sk){
           return `<td class="ediv spec-td" colspan="8">
-            <div class="sched-cell" data-row="${ri}" data-emp="${e}" onclick="openSchedMenu(event,${ri},${e})">${inner}</div>
+            <div class="sched-cell" data-row="${ri}" data-emp="${e}" onclick="clearCell2(${ri},${e})">${inner}</div>
             <!-- hidden ne placeholders for JS refresh -->
             ${['hl','rn','rnd','hdom','hfes','hexor','hexdomfes'].map(f=>`<span class="ne" style="display:none" data-row="${ri}" data-emp="${e}" data-field="${f}" data-orig="" onblur="commitEdit(this)" onkeydown="editKey(event,this)"></span>`).join('')}
           </td>`;
         }
-        return `<td class="ediv" style="min-width:110px">
-          <div class="sched-cell" data-row="${ri}" data-emp="${e}" onclick="openSchedMenu(event,${ri},${e})">${inner}</div>
+        return `<td class="ediv" style="min-width:120px">
+          <div class="sched-cell" data-row="${ri}" data-emp="${e}">${inner}</div>
         </td>
         <td>${ne(emp.hl,ri,e,'hl','c-hl')}</td>
         <td>${ne(emp.rn,ri,e,'rn','c-rn')}</td>
@@ -654,6 +677,9 @@ function twk(id){
   const a=document.getElementById(`ar-${id}`);if(a) a.textContent=wst[id]?'▶ días':'▼ días';
 }
 
+function clearCell2(ri,ei){
+  applyEdit(ri,ei,'','',null);
+}
 function exportCSV(){
   if(!sel) return;
   const tienda=DATA[sel],ei=activeEmps(tienda);
