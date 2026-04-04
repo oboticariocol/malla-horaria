@@ -218,8 +218,8 @@ tr.tot td.s0,tr.tot td.s1{background:var(--green-d);color:#fff;font-size:12.5px}
     <div><span id="saveStatus" style="font-size:10px;color:var(--green);margin-right:10px;transition:opacity .5s;opacity:0"></span><div class="tit" id="topT">Selecciona una tienda</div><div class="tsub" id="topS">Malla horaria · Liquidación de horas</div></div>
     <div class="topbar-r">
       <div class="df">📅
-        <input type="date" id="dfrom" value="2026-03-01" onchange="render()"> →
-        <input type="date" id="dto" value="2026-03-31" onchange="render()">
+        <input type="date" id="dfrom" onchange="render()"> →
+        <input type="date" id="dto" onchange="render()">
       </div>
       <div class="vtog">
         <button class="vb active" id="btnM" onclick="setView('malla')">📋 Malla</button>
@@ -685,33 +685,40 @@ function render() {
   cnt.innerHTML = cards + (view === 'asesores' ? renderEmp(ei, df, dt) : renderMalla(ei, df, dt));
 }
 
-// Check if asesor has a Compensatorio in the same ISO week as dateStr
-function hasCompensatorioInWeek(tiendaCode, empIdx, dateStr) {
-  // Get ISO week of dateStr
-  const d = parseDateStr(dateStr);
-  const weekNum = isoWeek(d);
-  const year = d.getFullYear();
-  // Scan all days in SCHED for this tienda/emp in same week
+// Check if asesor has Compensatorio in the 6 days AFTER a Sunday (Mon-Sat next week)
+function hasCompensatorioNextDays(tiendaCode, empIdx, dateStr) {
   if (!SCHED[tiendaCode]) return false;
-  return Object.entries(SCHED[tiendaCode]).some(([dt2, dayData]) => {
-    const d2 = parseDateStr(dt2);
-    if (d2.getFullYear() !== year || isoWeek(d2) !== weekNum) return false;
+  const sunday = parseDateStr(dateStr);
+  // Check the 6 days after the sunday (Mon to Sat)
+  for (let i = 1; i <= 6; i++) {
+    const next = new Date(sunday);
+    next.setDate(sunday.getDate() + i);
+    const nextStr = next.toISOString().slice(0,10);
+    const dayData = SCHED[tiendaCode][nextStr];
+    if (!dayData) continue;
     const emp = dayData[empIdx];
-    return emp && getSpecKey(emp.ap) === 'Compensatorio';
-  });
+    if (emp && getSpecKey(emp.ap) === 'Compensatorio') return true;
+  }
+  return false;
 }
 
-// Resolve final hdom vs hfes for a Sunday:
-// If there's a Compensatorio in same week → HDom
-// If not → HFes (trabajó el domingo sin descanso = pago festivo)
+// Resolve final hdom vs hfes:
+// Festivo entre semana (L-S) → siempre H.Fest
+// Domingo + Compensatorio en los 6 dias SIGUIENTES → Dom+Comp
+// Domingo + sin Compensatorio en los 6 dias siguientes → H.Fest
 function resolvedHours(tiendaCode, empIdx, dateStr) {
   const emp = getEmp(tiendaCode, dateStr, empIdx);
   if (!emp || !emp.ap || getSpecKey(emp.ap)) return {hdom:0, hfes:0};
-  if (emp.esFestivo) return {hdom:0, hfes: emp.hl||0};
+
+  // Festivo entre semana (no domingo) → siempre H.Fest
+  if (emp.esFestivo && !emp.esDomingo) return {hdom:0, hfes: emp.hl||0};
+
+  // Domingo trabajado
   if (emp.esDomingo) {
-    const hasComp = hasCompensatorioInWeek(tiendaCode, empIdx, dateStr);
+    const hasComp = hasCompensatorioNextDays(tiendaCode, empIdx, dateStr);
     return hasComp ? {hdom: emp.hl||0, hfes:0} : {hdom:0, hfes: emp.hl||0};
   }
+
   return {hdom:0, hfes:0};
 }
 
@@ -1134,6 +1141,17 @@ document.addEventListener('click', e => {
   if (m.style.display !== 'none' && !m.contains(e.target)) closeMenu();
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); tpClose(); } });
+
+// Set date range to current month on load
+(function() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+  document.getElementById('dfrom').value = `${y}-${m}-01`;
+  document.getElementById('dto').value   = `${y}-${m}-${String(lastDay).padStart(2,'0')}`;
+})();
+
 
 buildSB();
 
