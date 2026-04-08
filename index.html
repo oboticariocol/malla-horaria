@@ -476,8 +476,10 @@ function calcHours(ap, ci, dateStr) {
   let diffMin = c - a; if (diffMin <= 0) diffMin += 24 * 60;
   const totalHrs = diffMin / 60;
 
-  // Lunch deduction: shifts > 6h → subtract 1h for lunch break
-  const hl = totalHrs > 6 ? Math.floor(totalHrs) - 1 : Math.floor(totalHrs);
+  // Lunch deduction: only if entry BEFORE 15:00 AND shift > 8h
+  // After 3pm = no lunch break (closing shifts)
+  const rawHrs = Math.floor(totalHrs);
+  const hl = (a < 15 * 60 && rawHrs > 8) ? rawHrs - 1 : rawHrs;
 
   const festivo = isFestivo(dateStr);
   const domingo = isDomingo(dateStr);
@@ -684,9 +686,9 @@ function commitTime(el) {
     emp.rnd     = calc.rnd > 0 ? calc.rnd : '';
     emp.esDomingo = calc.esDomingo || false;
     emp.esFestivo = calc.esFestivo || false;
-    // hdom/hfes resolved weekly — store 0 for now, updated by resolveWeekDomFes
-    emp.hdom = calc.esDomingo ? calc.hl : '';  // provisional
-    emp.hfes = calc.esFestivo ? calc.hl : '';  // festivo always HFes
+    // hdom/hfes resolved dynamically by resolvedHours()
+    emp.hdom = '';
+    emp.hfes = '';
     emp.hexor = '';
     emp.hexdf = '';
   } else {
@@ -804,21 +806,20 @@ function hasCompensatorioNextDays(tiendaCode, empIdx, dateStr) {
 }
 
 // Resolve final hdom vs hfes:
-// Festivo entre semana (L-S) → siempre H.Fest
-// Domingo + Compensatorio en los 6 dias SIGUIENTES → Dom+Comp
-// Domingo + sin Compensatorio en los 6 dias siguientes → H.Fest
+// Festivo (incluyendo domingo festivo) → siempre H.Fest
+// Domingo (no festivo) → siempre H.Dominical
 function resolvedHours(tiendaCode, empIdx, dateStr) {
   const emp = getEmp(tiendaCode, dateStr, empIdx);
   if (!emp || !emp.ap || getSpecKey(emp.ap)) return {hdom:0, hfes:0};
 
-  // Festivo entre semana (no domingo) → siempre H.Fest
-  if (emp.esFestivo && !emp.esDomingo) return {hdom:0, hfes: emp.hl||0};
+  const festivo = isFestivo(dateStr);
+  const domingo = isDomingo(dateStr);
 
-  // Domingo trabajado
-  if (emp.esDomingo) {
-    const hasComp = hasCompensatorioNextDays(tiendaCode, empIdx, dateStr);
-    return hasComp ? {hdom: emp.hl||0, hfes:0} : {hdom:0, hfes: emp.hl||0};
-  }
+  // Festivo siempre gana (incluso si cae en domingo)
+  if (festivo) return {hdom:0, hfes: n(emp.hl)};
+
+  // Domingo no festivo → H.Dominical
+  if (domingo) return {hdom: n(emp.hl), hfes:0};
 
   return {hdom:0, hfes:0};
 }
@@ -1236,8 +1237,8 @@ function applyTimeEdit(date, empIdx, ap, ci) {
     emp.rnd = calc.rnd > 0 ? calc.rnd : '';
     emp.esDomingo = calc.esDomingo || false;
     emp.esFestivo = calc.esFestivo || false;
-    emp.hdom = calc.esDomingo ? calc.hl : '';
-    emp.hfes = calc.esFestivo ? calc.hl : '';
+    emp.hdom = ''; // resolved dynamically
+    emp.hfes = ''; // resolved dynamically
     emp.hexor = ''; emp.hexdf = '';
   } else {
     emp.hl=''; emp.hlOrd=''; emp.rn=''; emp.rnd=''; emp.hdom=''; emp.hfes='';
@@ -1352,6 +1353,29 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(
 
 
 // Recalculate all stored schedule data with current rules
+// Silent recalculation — runs automatically when data loads from Firebase
+function silentRecalc(tiendaCode) {
+  const tiendaData = SCHED[tiendaCode];
+  if (!tiendaData) return;
+  Object.entries(tiendaData).forEach(([date, dayData]) => {
+    Object.entries(dayData).forEach(([empIdx, emp]) => {
+      if (!emp || !emp.ap || !emp.ci) return;
+      if (getSpecKey(emp.ap)) return;
+      const calc = calcHours(emp.ap, emp.ci, date);
+      if (!calc) return;
+      emp.hl    = calc.hl;
+      emp.hlOrd = calc.hlOrd;
+      emp.rn    = calc.rn  > 0 ? calc.rn  : '';
+      emp.rnd   = calc.rnd > 0 ? calc.rnd : '';
+      emp.esDomingo = calc.esDomingo || false;
+      emp.esFestivo = calc.esFestivo || false;
+      emp.hdom  = ''; // resolved dynamically by resolvedHours()
+      emp.hfes  = ''; // resolved dynamically by resolvedHours()
+      emp.hexor = ''; emp.hexdf = '';
+    });
+  });
+}
+
 function recalcAll() {
   if (!sel) return;
   if (!confirm('¿Recalcular todas las horas de esta tienda con las reglas actuales? (RN desde 19h, descuento almuerzo, etc.)')) return;
@@ -1361,7 +1385,7 @@ function recalcAll() {
   Object.entries(tiendaData).forEach(([date, dayData]) => {
     Object.entries(dayData).forEach(([empIdx, emp]) => {
       if (!emp || !emp.ap || !emp.ci) return;
-      if (getSpecKey(emp.ap)) return; // skip special days
+      if (getSpecKey(emp.ap)) return;
       const calc = calcHours(emp.ap, emp.ci, date);
       if (!calc) return;
       emp.hl    = calc.hl;
@@ -1370,8 +1394,8 @@ function recalcAll() {
       emp.rnd   = calc.rnd > 0 ? calc.rnd : '';
       emp.esDomingo = calc.esDomingo || false;
       emp.esFestivo = calc.esFestivo || false;
-      emp.hdom  = calc.esDomingo ? calc.hl : '';
-      emp.hfes  = calc.esFestivo ? calc.hl : '';
+      emp.hdom  = ''; // resolved dynamically by resolvedHours()
+      emp.hfes  = ''; // resolved dynamically by resolvedHours()
       emp.hexor = ''; emp.hexdf = '';
       count++;
     });
@@ -1576,6 +1600,8 @@ function subscribeToTienda(tiendaCode) {
         if (!EMP_CONTRACT[tiendaCode]) EMP_CONTRACT[tiendaCode] = {};
         Object.assign(EMP_CONTRACT[tiendaCode], ct);
       }
+      // Auto-recalculate with current rules (fixes old data)
+      silentRecalc(tiendaCode);
       // Re-render if this is the currently selected tienda
       if (sel == tiendaCode) render();
     }
